@@ -155,9 +155,9 @@ const threeD = (() => {
  if (!window.THREE) { setTimeout(()=>setNetStatus('3D graphics could not load. Check the internet connection and refresh.'),0); return null; }
  const host = document.createElement('div'); host.id = 'game3d'; document.getElementById('gamebox').appendChild(host);
  let renderer;
- try { renderer = new THREE.WebGLRenderer({ alpha:true, antialias:true, powerPreference:'high-performance' }); }
+ try { renderer = new THREE.WebGLRenderer({ alpha:true, antialias:false, powerPreference:'low-power', precision:'mediump' }); }
  catch (err) { host.remove(); return null; }
- renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.75));
+ renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.15));
  renderer.setSize(Math.max(1, W), Math.max(1, H));
  renderer.outputColorSpace = THREE.SRGBColorSpace;
  renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 1.15;
@@ -268,7 +268,8 @@ const threeD = (() => {
    const flash=f.flash>0;
    root.traverse(o=>{if(o.isMesh && o.material && o.material.emissive){o.material.emissiveIntensity=flash?1.4:(o.material===undefined?0: (o===m.accentStripe?2.3: (o.material.color && o.material.color.getHexString()===((heroes[f.name]||heroes.Nova).color||'').replace('#','')?2.1:0)));}});
  }
- function resize3d(){const w=Math.max(1,W),h=Math.max(1,H);renderer.setSize(w,h,false);camera.left=-w/2;camera.right=w/2;camera.top=h/2;camera.bottom=-h/2;camera.updateProjectionMatrix();}
+ let lastRenderW=0,lastRenderH=0;
+ function resize3d(){const w=Math.max(1,Math.floor(W)),h=Math.max(1,Math.floor(H));if(w===lastRenderW&&h===lastRenderH)return;lastRenderW=w;lastRenderH=h;renderer.setSize(w,h,false);camera.left=-w/2;camera.right=w/2;camera.top=h/2;camera.bottom=-h/2;camera.updateProjectionMatrix();}
  function render(p,e,dt){resize3d();updateModel(p,e,dt);updateModel(e,p,dt);renderer.render(scene,camera);}
  return {render,scene,renderer};
 })();
