@@ -296,38 +296,139 @@ function drawStage(){
  ctx.fillStyle='#ffd166';ctx.font=`bold ${Math.max(10,W*.018)}px system-ui`;ctx.textAlign='center';ctx.fillText('SHADOW ARENA',W/2,ground-18);
 }
 function drawFighter(f){
- const x=f.x,y=f.y,scale=Math.max(.7,Math.min(1.15,H/500));
- ctx.save();ctx.translate(x,y);if(f.face<0)ctx.scale(-1,1);
- // shadow
- ctx.globalAlpha=.25;ctx.fillStyle='#000';ctx.beginPath();ctx.ellipse(0,f.h+3,38,9,0,0,Math.PI*2);ctx.fill();ctx.globalAlpha=1;
+ const scale=Math.max(.7,Math.min(1.15,H/500));
+ const x=f.x,y=f.y;
+ const moving=Math.abs((keys.left?1:0)-(keys.right?1:0))>0 && f.isPlayer;
+ const stride=f.onGround ? Math.sin((f.walk||0)*2.8)*0.72 : 0.18;
+ const attackType=f.attack&&f.attack.type;
+ const attacking=!!f.attack && f.attackTime>0;
+ const phase=attacking ? Math.max(0,Math.min(1, f.attackTime/(attackType==='special'?26:attackType==='kick'?20:15))) : 0;
+ const lunge=attacking ? Math.sin((1-phase)*Math.PI)*0.12 : 0;
  const c=f.flash>0?'#ffffff':f.color;
- // legs and boots
- ctx.strokeStyle='#171a2a';ctx.lineWidth=15*scale;ctx.lineCap='round';
- const step=f.onGround?Math.sin(f.walk)*7:0;
- ctx.beginPath();ctx.moveTo(-12,76);ctx.lineTo(-15+step,101);ctx.stroke();
- ctx.beginPath();ctx.moveTo(12,76);ctx.lineTo(15-step,101);ctx.stroke();
- ctx.fillStyle='#0b0d18';rounded(-28+step,94,24,12,4);rounded(5-step,94,24,12,4);
- // torso armor
- ctx.fillStyle=c;ctx.beginPath();ctx.moveTo(-22,33);ctx.lineTo(21,33);ctx.lineTo(26,74);ctx.lineTo(-24,74);ctx.closePath();ctx.fill();
- ctx.fillStyle=f.accent;ctx.globalAlpha=.75;ctx.fillRect(-17,43,34,5);ctx.globalAlpha=1;
- // belt
- ctx.fillStyle='#1a1b2c';ctx.fillRect(-24,69,48,8);ctx.fillStyle='#ffd166';ctx.fillRect(-4,69,9,8);
- // arms
- ctx.strokeStyle=c;ctx.lineWidth=12*scale;ctx.lineCap='round';
- let armX= f.attack ? (f.attack.type==='kick'?25:f.attack.type==='special'?42:36) : 25;
- let armY= f.attack ? (f.attack.type==='special'?43:40) : 52;
- ctx.beginPath();ctx.moveTo(-18,40);ctx.lineTo(-26,61);ctx.stroke();
- ctx.beginPath();ctx.moveTo(18,40);ctx.lineTo(armX,armY);ctx.stroke();
- ctx.fillStyle=f.accent;ctx.beginPath();ctx.arc(armX,armY,8,0,Math.PI*2);ctx.fill();
- // neck and head
- ctx.fillStyle='#a66f62';ctx.fillRect(-7,24,14,12);
- ctx.fillStyle=c;ctx.beginPath();ctx.arc(0,17,18,0,Math.PI*2);ctx.fill();
- // mask and eye
- ctx.fillStyle='#11172b';ctx.fillRect(-15,12,30,10);ctx.fillStyle='#fff';ctx.fillRect(4,15,6,3);
- // head crest
- ctx.fillStyle=f.accent;ctx.beginPath();ctx.moveTo(-12,3);ctx.lineTo(-2,-10);ctx.lineTo(5,4);ctx.closePath();ctx.fill();
- if(f.blocking){ctx.strokeStyle='#b8eaff';ctx.lineWidth=4;ctx.beginPath();ctx.arc(6,48,38,-1.1,1.1);ctx.stroke();}
- if(f.attack&&f.attack.type==='special'){ctx.globalAlpha=.6;ctx.fillStyle=f.color;ctx.beginPath();ctx.arc(armX+8,armY,18,0,Math.PI*2);ctx.fill();ctx.globalAlpha=1;}
+ const accent=f.accent||'#f5f7ff';
+ const skin=f.flash>0?'#ffffff':'#9b6657';
+ const dark='#101321';
+ const metal='#c6d0e6';
+ const glow=f.color;
+ const grad=(x1,y1,x2,y2,stops)=>{const g=ctx.createLinearGradient(x1,y1,x2,y2);stops.forEach(s=>g.addColorStop(s[0],s[1]));return g;};
+ const ellipse=(x,y,rx,ry,fill)=>{ctx.fillStyle=fill;ctx.beginPath();ctx.ellipse(x,y,rx,ry,0,0,Math.PI*2);ctx.fill();};
+ const limb=(x1,y1,x2,y2,width,color)=>{ctx.strokeStyle=color;ctx.lineWidth=width;ctx.lineCap='round';ctx.lineJoin='round';ctx.beginPath();ctx.moveTo(x1,y1);ctx.lineTo(x2,y2);ctx.stroke();};
+ ctx.save();ctx.translate(x,y);ctx.scale(scale,scale);if(f.face<0)ctx.scale(-1,1);ctx.translate(lunge*25,0);
+ // Ground shadow and character aura give the sprite a stronger sense of depth.
+ ctx.save();ctx.globalAlpha=.32;ctx.filter='blur(5px)';ellipse(0,111,36,8,'#000');ctx.restore();
+ // Distinct champion silhouettes: these are character-specific shapes, not just palette swaps.
+ const heroName=f.name;
+ const poly=(pts,fill,stroke='rgba(255,255,255,.45)')=>{ctx.beginPath();ctx.moveTo(pts[0][0],pts[0][1]);for(let i=1;i<pts.length;i++)ctx.lineTo(pts[i][0],pts[i][1]);ctx.closePath();ctx.fillStyle=fill;ctx.fill();if(stroke){ctx.strokeStyle=stroke;ctx.lineWidth=1.5;ctx.stroke();}};
+ const cape=(fill)=>poly([[-15,35],[-27,48],[-34,86],[-15,78],[0,91],[14,78],[29,49],[15,35],[8,67],[0,73],[-8,66]],fill,'rgba(255,255,255,.25)');
+ if(heroName==='Onyx'||heroName==='Shade'||heroName==='Dread'||heroName==='Phantom'){
+   cape(heroName==='Shade'?'#151725':'#080b16');
+   poly([[-15,4],[-18,-4],[-8,-1],[0,-9],[9,-1],[17,-4],[13,13],[7,8],[-7,8]],heroName==='Phantom'?'#493b73':'#0a0c18');
+ }
+ if(heroName==='Titan'||heroName==='Atlas'||heroName==='Rook'||heroName==='Warlord'){
+   poly([[-17,34],[-31,27],[-39,37],[-34,53],[-19,49]],heroName==='Titan'?'#7561aa':'#454b5e');
+   poly([[17,34],[31,27],[39,37],[34,53],[19,49]],heroName==='Titan'?'#7561aa':'#454b5e');
+   if(heroName==='Titan'||heroName==='Atlas') {poly([[-13,34],[-19,19],[-7,25],[0,12],[7,25],[19,19],[13,35]],'#d5c5ff');}
+ }
+ if(heroName==='Ronin'){
+   poly([[-12,4],[-18,-3],[-7,-1],[0,-7],[8,-1],[16,-3],[11,7]],'#6d3c28');
+   limb(-2,-3,-1,-22,4,'#18131b');ellipse(-1,-24,5,4,'#e9d7bd');
+   limb(-20,38,-34,57,4,'#d9dce8');limb(-34,57,-40,65,7,'#4b2b28');
+ }
+ if(heroName==='Viper'){
+   poly([[-14,5],[-20,-5],[-7,0],[0,-13],[7,0],[20,-5],[14,8]],'#163d2b');
+   poly([[18,37],[31,32],[38,44],[28,51]],'#194c35');
+   limb(28,48,42,35,3,'#b6ffd0');limb(42,35,46,27,2,'#b6ffd0');
+ }
+ if(heroName==='Phoenix'){
+   poly([[-15,39],[-31,27],[-46,17],[-38,38],[-48,34],[-33,58],[-18,62]],'#ff7a22');
+   poly([[15,39],[31,27],[46,17],[38,38],[48,34],[33,58],[18,62]],'#ffd166');
+   ctx.save();ctx.shadowColor='#ff7a22';ctx.shadowBlur=12;poly([[-10,-1],[-8,-13],[0,-6],[7,-17],[10,0]],'#ffb02e');ctx.restore();
+ }
+ if(heroName==='Frost'){
+   poly([[-14,5],[-20,-8],[-9,-3],[-5,-17],[2,-5],[10,-14],[12,0],[19,-4],[12,10]],'#bff7ff');
+   poly([[-22,42],[-33,37],[-29,52],[-18,56]],'#70d9ef');
+ }
+ if(heroName==='Storm'||heroName==='Nova'){
+   poly([[-13,5],[-20,-6],[-5,-2],[2,-17],[7,-3],[18,-8],[12,8]],heroName==='Storm'?'#ffe58a':'#8ff6ff');
+   if(heroName==='Storm'){poly([[24,39],[37,35],[31,46],[40,49],[24,54]],'#fff1a3');}
+ }
+ if(heroName==='Ember'||heroName==='Blaze'){
+   poly([[-13,5],[-17,-6],[-8,-1],[-5,-15],[2,-5],[9,-17],[9,-1],[17,-5],[12,8]],heroName==='Blaze'?'#ff3d22':'#ff9b42');
+   poly([[-21,40],[-32,31],[-27,47],[-18,52]],'#b83224');
+ }
+ if(heroName==='Echo'){
+   ctx.strokeStyle='#b7fbff';ctx.lineWidth=3;ctx.shadowColor='#56cfe1';ctx.shadowBlur=8;
+   ctx.beginPath();ctx.arc(-4,14,18,-1.1,1.1);ctx.stroke();ctx.beginPath();ctx.arc(-4,14,25,-1.1,1.1);ctx.stroke();ctx.shadowBlur=0;
+   ellipse(0,-2,7,5,'#b5f9ff');
+ }
+ if(attackType==='special'&&attacking){ctx.save();ctx.globalAlpha=.22+.12*Math.sin(performance.now()*.02);ctx.shadowColor=glow;ctx.shadowBlur=28;ellipse(0,57,35,54,glow);ctx.restore();}
+ // Back leg: articulated thigh, shin, armored boot and small edge highlights.
+ const backKneeX=-17+stride*5, frontKneeX=15-stride*5;
+ limb(-8,72,backKneeX,91,15,grad(-20,70,0,100,[[0,'#44495d'],[.45,'#202638'],[1,'#090d18']]));
+ limb(backKneeX,91,-25+stride*7,103,12,'#171c2b');
+ limb(-27+stride*7,103,-12+stride*7,103,5,metal);
+ limb(10,72,frontKneeX,91,16,grad(0,70,25,100,[[0,'#626a80'],[.42,'#252b40'],[1,'#0a0d18']]));
+ limb(frontKneeX,91,20-stride*7,102,12,'#151a29');
+ // Boots with plated toes and small metallic seams.
+ ctx.fillStyle='#080c16';ctx.beginPath();ctx.moveTo(-31+stride*7,98);ctx.lineTo(-11+stride*7,98);ctx.lineTo(-7+stride*7,107);ctx.lineTo(-34+stride*7,107);ctx.closePath();ctx.fill();
+ ctx.fillStyle='#111a2c';ctx.beginPath();ctx.moveTo(7-stride*7,98);ctx.lineTo(27-stride*7,98);ctx.lineTo(33-stride*7,107);ctx.lineTo(6-stride*7,107);ctx.closePath();ctx.fill();
+ limb(-29+stride*7,102,-13+stride*7,102,2,accent);limb(10-stride*7,102,28-stride*7,102,2,accent);
+ // Rear arm and shoulder armor.
+ limb(-17,42,-29,58,13,grad(-32,40,-12,62,[[0,c],[.5,'#22283c'],[1,dark]]));
+ ellipse(-29,58,8,9,grad(-37,50,-20,66,[[0,accent],[.4,c],[1,'#252a3d']]));
+ // Torso: layered armor silhouette with chest plate, side panels and luminous core.
+ ctx.beginPath();ctx.moveTo(-17,31);ctx.quadraticCurveTo(-25,33,-24,43);ctx.lineTo(-22,70);ctx.quadraticCurveTo(0,80,23,70);ctx.lineTo(24,43);ctx.quadraticCurveTo(24,33,16,31);ctx.closePath();
+ ctx.fillStyle=grad(-24,32,24,74,[[0,accent],[.16,c],[.48,'#252a40'],[.78,c],[1,dark]]);ctx.fill();
+ ctx.strokeStyle='rgba(255,255,255,.28)';ctx.lineWidth=1.5;ctx.stroke();
+ // Chest plates and seams.
+ ctx.beginPath();ctx.moveTo(-16,37);ctx.lineTo(-2,41);ctx.lineTo(-3,59);ctx.lineTo(-16,64);ctx.closePath();ctx.fillStyle=grad(-16,37,-2,64,[[0,accent],[.35,c],[1,'#20253a']]);ctx.fill();
+ ctx.beginPath();ctx.moveTo(16,37);ctx.lineTo(2,41);ctx.lineTo(3,59);ctx.lineTo(16,64);ctx.closePath();ctx.fillStyle=grad(2,37,16,64,[[0,accent],[.4,c],[1,'#20253a']]);ctx.fill();
+ ctx.strokeStyle='rgba(8,12,24,.8)';ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(0,39);ctx.lineTo(0,68);ctx.stroke();
+ // Energy core and insignia.
+ ctx.save();ctx.shadowColor=glow;ctx.shadowBlur=12;ellipse(0,49,5.5,7,accent);ctx.restore();
+ ctx.fillStyle=glow;ctx.globalAlpha=.8;ctx.beginPath();ctx.moveTo(-13,60);ctx.lineTo(-4,64);ctx.lineTo(-8,68);ctx.closePath();ctx.fill();ctx.beginPath();ctx.moveTo(13,60);ctx.lineTo(4,64);ctx.lineTo(8,68);ctx.closePath();ctx.fill();ctx.globalAlpha=1;
+ // Waist armor and segmented belt.
+ ctx.fillStyle='#101625';ctx.beginPath();ctx.moveTo(-23,68);ctx.lineTo(23,68);ctx.lineTo(19,79);ctx.lineTo(-18,79);ctx.closePath();ctx.fill();
+ ctx.fillStyle=grad(-5,68,6,78,[[0,'#fff0b0'],[.5,'#e2ae4b'],[1,'#7a4a16']]);ctx.beginPath();ctx.moveTo(-5,69);ctx.lineTo(5,69);ctx.lineTo(6,77);ctx.lineTo(-6,77);ctx.closePath();ctx.fill();
+ // Front arm animates through guard, punch and special poses.
+ let shoulderX=17,shoulderY=41,elbowX=27,elbowY=53,handX=27,handY=58;
+ if(f.blocking){elbowX=23;elbowY=38;handX=13;handY=27;}
+ if(attackType==='punch'&&attacking){elbowX=30+Math.sin((1-phase)*Math.PI)*5;elbowY=39;handX=44+Math.sin((1-phase)*Math.PI)*9;handY=39;}
+ if(attackType==='special'&&attacking){elbowX=29;elbowY=35;handX=47;handY=34;}
+ if(attackType==='kick'&&attacking){elbowX=24;elbowY=35;handX=35;handY=29;}
+ limb(shoulderX,shoulderY,elbowX,elbowY,15,grad(12,35,34,58,[[0,accent],[.35,c],[.8,'#22283c'],[1,dark]]));
+ ellipse(shoulderX,shoulderY,10,11,grad(7,30,26,52,[[0,accent],[.3,c],[1,'#161b2a']]));
+ limb(elbowX,elbowY,handX,handY,12,grad(elbowX-4,elbowY-3,handX+4,handY+4,[[0,c],[.55,'#30374d'],[1,dark]]));
+ // Gauntlet and knuckle plates.
+ ellipse(handX,handY,8,8,grad(handX-7,handY-7,handX+8,handY+8,[[0,'#f4f7ff'],[.25,accent],[.65,c],[1,'#111728']]));
+ ctx.strokeStyle='rgba(255,255,255,.55)';ctx.lineWidth=1.2;ctx.beginPath();ctx.arc(handX,handY,5,-2.4,.6);ctx.stroke();
+ // Neck and head with cheek/jaw shading.
+ ctx.fillStyle=skin;ctx.fillRect(-6,24,12,12);
+ ctx.beginPath();ctx.moveTo(-13,12);ctx.quadraticCurveTo(-13,-2,0,-3);ctx.quadraticCurveTo(15,-1,15,12);ctx.lineTo(11,26);ctx.quadraticCurveTo(0,34,-10,24);ctx.closePath();
+ ctx.fillStyle=grad(-13,0,15,28,[[0,'#f0b59a'],[.25,'#b77d68'],[.7,'#7d4b43'],[1,'#332532']]);ctx.fill();
+ // Brow, eyes, mask and temple detail.
+ ctx.fillStyle='#141729';ctx.beginPath();ctx.moveTo(-13,10);ctx.lineTo(13,8);ctx.lineTo(12,17);ctx.lineTo(-12,18);ctx.closePath();ctx.fill();
+ ctx.fillStyle=accent;ctx.shadowColor=glow;ctx.shadowBlur=7;ctx.fillRect(3,12,7,3);ctx.shadowBlur=0;
+ ctx.fillStyle='#090e1a';ctx.beginPath();ctx.moveTo(-13,17);ctx.lineTo(12,16);ctx.lineTo(8,24);ctx.lineTo(-7,25);ctx.closePath();ctx.fill();
+ ctx.strokeStyle='rgba(255,255,255,.35)';ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(-8,20);ctx.lineTo(-2,22);ctx.stroke();
+ // Helmet/crest and side fins make heroes read as distinct champions.
+ ctx.beginPath();ctx.moveTo(-12,7);ctx.lineTo(-17,-2);ctx.lineTo(-5,2);ctx.lineTo(0,-12);ctx.lineTo(6,2);ctx.lineTo(16,-1);ctx.lineTo(11,9);ctx.closePath();
+ ctx.fillStyle=grad(-14,-10,14,10,[[0,accent],[.3,c],[.8,'#30364d'],[1,dark]]);ctx.fill();ctx.strokeStyle='rgba(255,255,255,.45)';ctx.lineWidth=1;ctx.stroke();
+ // Shoulder plate on the front side.
+ ctx.beginPath();ctx.moveTo(9,32);ctx.lineTo(22,29);ctx.lineTo(31,38);ctx.lineTo(25,47);ctx.lineTo(15,43);ctx.closePath();ctx.fillStyle=grad(10,29,30,46,[[0,accent],[.25,c],[.7,'#22283c'],[1,dark]]);ctx.fill();
+ ctx.strokeStyle='rgba(255,255,255,.35)';ctx.lineWidth=1;ctx.stroke();
+ // Extra signature armor marks help each champion remain readable during movement.
+ if(heroName==='Rook'||heroName==='Atlas'||heroName==='Titan'){
+   poly([[-20,68],[-9,73],[-12,88],[-22,83]],heroName==='Rook'?'#aeb8c9':'#8f7bc6');
+   poly([[20,68],[9,73],[12,88],[22,83]],heroName==='Rook'?'#aeb8c9':'#8f7bc6');
+ }
+ if(heroName==='Shade'||heroName==='Onyx'||heroName==='Phantom'){
+   poly([[-8,34],[0,29],[8,34],[6,61],[0,68],[-6,61]],'#080b16','rgba(150,130,255,.6)');
+ }
+ // Defensive field and special-energy trails.
+ if(f.blocking){ctx.save();ctx.globalAlpha=.75;ctx.strokeStyle='#bcecff';ctx.lineWidth=3;ctx.shadowColor='#5bd8ff';ctx.shadowBlur=14;ctx.beginPath();ctx.ellipse(7,49,38,43,-.08,-1.18,1.18);ctx.stroke();ctx.restore();}
+ if(attackType==='special'&&attacking){ctx.save();ctx.globalAlpha=.8;ctx.strokeStyle=glow;ctx.lineWidth=5;ctx.shadowColor=glow;ctx.shadowBlur=20;ctx.beginPath();ctx.arc(handX+7,handY,19,-1.3,1.4);ctx.stroke();ctx.globalAlpha=.3;ctx.fillStyle=accent;ctx.beginPath();ctx.arc(handX+7,handY,15,0,Math.PI*2);ctx.fill();ctx.restore();}
+ if(attackType==='punch'&&attacking){ctx.save();ctx.globalAlpha=.3+.3*Math.sin((1-phase)*Math.PI);ctx.strokeStyle=accent;ctx.lineWidth=4;ctx.shadowColor=glow;ctx.shadowBlur=12;ctx.beginPath();ctx.moveTo(handX-8,handY-3);ctx.lineTo(handX-24,handY-7);ctx.stroke();ctx.restore();}
  ctx.restore();
 }
 function draw(){
