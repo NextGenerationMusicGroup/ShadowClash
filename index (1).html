@@ -16,6 +16,11 @@
   #status { font-size:12px; text-align:right; color:#fff1b8; }
   #gamebox { position:relative; flex:1; min-height:0; }
   canvas { width:100%; height:100%; display:block; background:#10152b; }
+  #game { position:relative; z-index:0; }
+  #game3d { position:absolute; inset:0; width:100%; height:100%; z-index:1; pointer-events:none; }
+  #game3d canvas { width:100%; height:100%; display:block; background:transparent; }
+  #hud { z-index:2; }
+  .overlay { z-index:3; }
   .overlay { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; background:#050815d9; padding:16px; }
   .panel { width:min(760px,100%); max-height:94%; overflow:auto; background:linear-gradient(145deg,#182344,#2b1239); border:1px solid #6677ad; border-radius:18px; padding:22px; text-align:center; box-shadow:0 15px 60px #0009; }
   .panel h2 { margin:0 0 8px; color:var(--gold); font-size:clamp(24px,5vw,38px); }
@@ -58,6 +63,7 @@
     #onlineLobby {padding:7px!important;margin:6px 0!important} #onlineLobby h3 {font-size:14px}
   }
 </style>
+<script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
 <script src="/socket.io/socket.io.js"></script>
 </head>
 <body>
@@ -143,6 +149,129 @@ const heroes = {
 let player,enemy,particles=[],texts=[],storyMode=false,storyIndex=0,audioCtx=null,finisherUsed=false;
 function resize(){ const r=canvas.getBoundingClientRect(); if(!r.width||!r.height)return; const d=Math.min(window.devicePixelRatio||1,2); canvas.width=Math.max(1,Math.floor(r.width*d));canvas.height=Math.max(1,Math.floor(r.height*d));W=r.width;H=r.height;ctx.setTransform(d,0,0,d,0,0);ground=H*.81; }
 window.addEventListener('resize',resize); resize();
+
+// Three.js presentation layer. The existing combat simulation and Socket.IO messages remain authoritative.
+const threeD = (() => {
+ if (!window.THREE) { setTimeout(()=>setNetStatus('3D graphics could not load. Check the internet connection and refresh.'),0); return null; }
+ const host = document.createElement('div'); host.id = 'game3d'; document.getElementById('gamebox').appendChild(host);
+ let renderer;
+ try { renderer = new THREE.WebGLRenderer({ alpha:true, antialias:true, powerPreference:'high-performance' }); }
+ catch (err) { host.remove(); return null; }
+ renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.75));
+ renderer.setSize(Math.max(1, W), Math.max(1, H));
+ renderer.outputColorSpace = THREE.SRGBColorSpace;
+ renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 1.15;
+ host.appendChild(renderer.domElement);
+ const scene = new THREE.Scene();
+ const camera = new THREE.OrthographicCamera(-W/2, W/2, H/2, -H/2, 0.1, 3000); camera.position.set(0,0,1200); camera.lookAt(0,0,0);
+ scene.add(new THREE.HemisphereLight(0xb9d5ff, 0x211421, 2.0));
+ const keyLight = new THREE.DirectionalLight(0xffdfc0, 3.0); keyLight.position.set(-180,240,260); scene.add(keyLight);
+ const rimLight = new THREE.DirectionalLight(0x67cfff, 2.4); rimLight.position.set(260,130,-180); scene.add(rimLight);
+ const fillLight = new THREE.PointLight(0xff7a50, 90, 600); fillLight.position.set(0,120,180); scene.add(fillLight);
+ const models = new WeakMap();
+ const mat=(color,roughness=.62,metalness=0)=>new THREE.MeshStandardMaterial({color,roughness,metalness});
+ const sphereGeo = new THREE.SphereGeometry(1,20,14);
+ const cylGeo = new THREE.CylinderGeometry(1,1,1,12,1,false);
+ function ellipsoid(parent, name, pos, scale, material, rotY=0) {
+   const m=new THREE.Mesh(sphereGeo,material); m.name=name; m.position.set(...pos); m.scale.set(...scale); m.rotation.y=rotY; m.castShadow=false; m.receiveShadow=false; parent.add(m); return m;
+ }
+ function box(parent,pos,size,material,bevel=0) {
+   const m=new THREE.Mesh(new THREE.BoxGeometry(...size),material); m.position.set(...pos); parent.add(m); return m;
+ }
+ function segment(parent, material, radius=5) {
+   const mesh=new THREE.Mesh(new THREE.CylinderGeometry(radius*.72,radius,1,12),material); parent.add(mesh); return mesh;
+ }
+ function setSegment(mesh,a,b) {
+   const av=new THREE.Vector3(...a), bv=new THREE.Vector3(...b), d=new THREE.Vector3().subVectors(bv,av);
+   mesh.position.copy(av).add(bv).multiplyScalar(.5); mesh.scale.y=Math.max(.01,d.length()); mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0,1,0),d.normalize());
+ }
+ function createModel(name, f) {
+   const def=heroes[name]||heroes.Nova, root=new THREE.Group(); scene.add(root);
+   const armor=mat(def.color,.32,.42), bright=mat(def.accent,.26,.55), dark=mat('#171b27',.62,.22), leather=mat('#29212a',.8,.02), skin=mat('#9b684f',.72,0), skinLight=mat('#bd886b',.66,0), skinShadow=mat('#654233',.78,0), metal=mat('#aab9d2',.25,.8), eye=mat('#f2fbff',.2,.15), glow=new THREE.MeshStandardMaterial({color:def.color,emissive:def.color,emissiveIntensity:2.1,roughness:.28}), hair=mat(['Ronin','Viper'].includes(name)?'#171218':'#201a1b',.88,0);
+   // Natural torso mass and separate chest/abdominal forms create a sculpted human silhouette.
+   const pelvis=ellipsoid(root,'pelvis',[0,48,0],[11,10,7],leather);
+   const abdomen=ellipsoid(root,'abdomen',[0,61,0],[12,15,7.3],skinShadow);
+   const torso=ellipsoid(root,'torso',[0,73,0],[17,18,8.5],skin);
+   const pecL=ellipsoid(root,'left pectoral',[-7,76,6],[8,6,3.2],skinLight);
+   const pecR=ellipsoid(root,'right pectoral',[7,76,6],[8,6,3.2],skinLight);
+   for(let i=0;i<3;i++){ellipsoid(root,'abdominal muscle',[0,64-i*5,7],[5.5,2.3,1.4],skinLight);}
+   const chestPlate=ellipsoid(root,'chest armor',[0,75,8],[12,12,2.4],armor);
+   const chestCore=ellipsoid(root,'energy crest',[0,76,10.1],[3.1,4.2,1.1],glow);
+   // Neck and detailed head profile.
+   const neck=ellipsoid(root,'neck',[0,91,0],[5.2,7,5.4],skin);
+   const head=ellipsoid(root,'head',[0,101,0],[8.8,11.5,7.4],skinLight);
+   const jaw=ellipsoid(root,'jaw',[2.5,96,4.2],[5.6,4.6,3.5],skin);
+   const brow=ellipsoid(root,'brow',[2.6,104.2,6.1],[5.3,2,1.7],skinShadow);
+   ellipsoid(root,'visible eye',[4.1,103.1,7.2],[1.45,.85,.65],eye);
+   ellipsoid(root,'pupil',[4.5,103.05,7.72],[.48,.62,.24],dark);
+   ellipsoid(root,'nose',[7.1,100.9,5.2],[2.1,1.7,2],skinLight);
+   ellipsoid(root,'mouth',[4.8,97.4,7],[2.5,.65,.35],skinShadow);
+   // Character-specific hair/helmet silhouettes.
+   if(['Ronin','Viper','Onyx','Shade','Phantom','Dread'].includes(name)) {
+     ellipsoid(root,'hair cap',[0,108,0],[9.1,6.4,7.8],hair);
+     for(let i=0;i<5;i++) ellipsoid(root,'hair lock',[-5+i*2.5,99-(i%2)*3,-3],[1.8,7.5,2],hair,.12*i);
+   } else {
+     ellipsoid(root,'helmet crown',[0,109,0],[9.4,4.2,8],dark);
+     const crest=box(root,[0,114,0],[3.2,8,3],bright); crest.rotation.z=-.18;
+     ellipsoid(root,'helmet brow',[2,105,5],[7,2.3,4],armor);
+   }
+   // Broad shoulders, layered pauldrons, arms, gloves and articulated legs.
+   ellipsoid(root,'left deltoid',[-17,79,0],[7.2,8,7],skinShadow);
+   ellipsoid(root,'right deltoid',[17,79,0],[7.2,8,7],skinLight);
+   ellipsoid(root,'left pauldron',[-18,82,1],[8.6,5.2,8],armor);
+   ellipsoid(root,'right pauldron',[18,82,1],[8.6,5.2,8],bright);
+   ellipsoid(root,'belt',[0,51,0],[13,3.2,8],dark);
+   ellipsoid(root,'belt buckle',[0,51,8],[3.4,3.5,1.4],metal);
+   const upperArm1=segment(root,skinShadow,4.5), lowerArm1=segment(root,skin,3.7), upperArm2=segment(root,skinLight,4.8), lowerArm2=segment(root,skin,3.8);
+   const elbow1=ellipsoid(root,'rear elbow',[0,0,0],[4.2,4.2,4.2],skinShadow), elbow2=ellipsoid(root,'front elbow',[0,0,0],[4.2,4.2,4.2],skinLight);
+   const glove1=ellipsoid(root,'rear gauntlet',[0,0,0],[5.2,4.8,5],dark), glove2=ellipsoid(root,'front gauntlet',[0,0,0],[5.5,5,5.2],metal);
+   const thigh1=segment(root,skinShadow,6.4), shin1=segment(root,leather,4.7), thigh2=segment(root,skin,6.7), shin2=segment(root,leather,4.8);
+   const knee1=ellipsoid(root,'rear knee',[0,0,0],[5,5,4.6],dark), knee2=ellipsoid(root,'front knee',[0,0,0],[5.3,5.3,4.8],armor);
+   const boot1=ellipsoid(root,'rear boot',[0,3,3],[7.5,4,9],dark), boot2=ellipsoid(root,'front boot',[0,3,3],[8,4,9],dark);
+   const shinGlow=ellipsoid(root,'shin accent',[0,0,0],[1.6,6,.9],bright);
+   // A short cloth tab/cape gives the fighter a distinct silhouette without obscuring the body.
+   const cape= new THREE.Mesh(new THREE.BufferGeometry(),new THREE.MeshStandardMaterial({color:def.color,roughness:.9,side:THREE.DoubleSide,transparent:true,opacity:.82}));
+   const cp=new Float32Array([-10,84,-5,-19,70,-7,-15,45,-7,0,52,-7,10,45,-7,18,70,-7,10,84,-5]);
+   cape.geometry.setAttribute('position',new THREE.BufferAttribute(cp,3)); cape.geometry.setIndex([0,1,6,1,2,3,1,3,6,6,3,4,6,4,5]); cape.geometry.computeVertexNormals(); root.add(cape);
+   // Shoulder markings, forearm bracers and a glowing character emblem.
+   ellipsoid(root,'forearm bracer',[0,0,0],[4.8,3.8,4.7],bright);
+   const accentStripe=box(root,[0,69,8.7],[1.4,12,1.1],glow);
+   const parts={root,name,upperArm1,lowerArm1,upperArm2,lowerArm2,elbow1,elbow2,glove1,glove2,thigh1,shin1,thigh2,shin2,knee1,knee2,boot1,boot2,shinGlow,accentStripe,cape,head};
+   models.set(f,parts); return parts;
+ }
+ function updateModel(f, other, dt) {
+   if(!f)return;
+   let m=models.get(f); if(!m)m=createModel(f.name,f);
+   const root=m.root; root.position.set(f.x-W/2, H/2-(f.y+f.h), 0);
+   root.rotation.y = f.face>=0 ? .42 : Math.PI-.42;
+   const moving = Math.abs(f.vy||0)>0.5 || (f.isPlayer && (!!keys.left||!!keys.right)) || (!f.isPlayer && onlineMode && (remoteInput.left||remoteInput.right));
+   const stride=f.onGround ? Math.sin((f.walk||0)*2.8)*.72 : .22;
+   const attacking=!!f.attack && f.attackTime>0, type=attacking?f.attack.type:'';
+   const phase=attacking?Math.max(0,Math.min(1,f.attackTime/(type==='special'?26:type==='kick'?20:15))):0;
+   const punch=type==='punch'&&attacking, kick=type==='kick'&&attacking, special=type==='special'&&attacking;
+   const frontShoulder=[17,79,0], rearShoulder=[-17,79,-1];
+   let frontElbow=[24,67,2], frontHand=[25,58,3], rearElbow=[-24,67,-2], rearHand=[-25,57,2];
+   if(f.blocking){frontElbow=[15,84,3];frontHand=[10,91,5];rearElbow=[-7,85,4];rearHand=[2,91,5];}
+   if(punch){frontElbow=[26,77,2];frontHand=[40+Math.sin((1-phase)*Math.PI)*9,77,5];}
+   if(special){frontElbow=[28,82,4];frontHand=[44,83,8];}
+   if(kick){frontElbow=[22,84,2];frontHand=[32,91,4];}
+   setSegment(m.upperArm1,rearShoulder,rearElbow); setSegment(m.lowerArm1,rearElbow,rearHand); m.elbow1.position.set(...rearElbow);m.glove1.position.set(...rearHand);
+   setSegment(m.upperArm2,frontShoulder,frontElbow); setSegment(m.lowerArm2,frontElbow,frontHand); m.elbow2.position.set(...frontElbow);m.glove2.position.set(...frontHand);
+   const hip1=[-8,49,0], knee1=[-10+stride*5,27,1], foot1=[-13+stride*7,6,3];
+   const hip2=[8,49,1], knee2=[11-stride*5,27,2], foot2=[13-stride*7,6,3];
+   if(kick){knee2=[27,36,3];foot2=[44,45,4];}
+   if(!f.onGround){knee1=[-13,28,1];foot1=[-22,14,3];knee2=[13,31,2];foot2=[25,17,3];}
+   setSegment(m.thigh1,hip1,knee1);setSegment(m.shin1,knee1,foot1);setSegment(m.thigh2,hip2,knee2);setSegment(m.shin2,knee2,foot2);
+   m.knee1.position.set(...knee1);m.knee2.position.set(...knee2);m.boot1.position.set(...foot1);m.boot2.position.set(...foot2);m.shinGlow.position.set(knee2[0],(knee2[1]+foot2[1])/2,knee2[2]+3);
+   m.accentStripe.position.y = 69 + (f.blocking?1:0);
+   m.cape.rotation.x = Math.sin(performance.now()*.003+(f.isPlayer?0:1))*0.05 + (moving?-.08:0);
+   const flash=f.flash>0;
+   root.traverse(o=>{if(o.isMesh && o.material && o.material.emissive){o.material.emissiveIntensity=flash?1.4:(o.material===undefined?0: (o===m.accentStripe?2.3: (o.material.color && o.material.color.getHexString()===((heroes[f.name]||heroes.Nova).color||'').replace('#','')?2.1:0)));}});
+ }
+ function resize3d(){const w=Math.max(1,W),h=Math.max(1,H);renderer.setSize(w,h,false);camera.left=-w/2;camera.right=w/2;camera.top=h/2;camera.bottom=-h/2;camera.updateProjectionMatrix();}
+ function render(p,e,dt){resize3d();updateModel(p,e,dt);updateModel(e,p,dt);renderer.render(scene,camera);}
+ return {render,scene,renderer};
+})();
 function fighter(name,x,isPlayer){
  const def=heroes[name]||heroes.Nova;
  return {name,x,y:ground-112,w:62,h:112,hp:100,maxHp:100,face:isPlayer?1:-1,color:def.color,accent:def.accent,speed:def.speed,power:def.power,isPlayer,vy:0,onGround:true,blocking:false,attack:null,attackTime:0,cooldown:0,specialCharge:100,flash:0,walk:0,stun:0,aiWait:0};
@@ -316,6 +445,51 @@ function drawFighter(f){
  ctx.save();ctx.translate(x,y);ctx.scale(scale,scale);if(f.face<0)ctx.scale(-1,1);ctx.translate(lunge*25,0);
  // Ground shadow and character aura give the sprite a stronger sense of depth.
  ctx.save();ctx.globalAlpha=.32;ctx.filter='blur(5px)';ellipse(0,111,36,8,'#000');ctx.restore();
+ // Distinct champion silhouettes: these are character-specific shapes, not just palette swaps.
+ const heroName=f.name;
+ const poly=(pts,fill,stroke='rgba(255,255,255,.45)')=>{ctx.beginPath();ctx.moveTo(pts[0][0],pts[0][1]);for(let i=1;i<pts.length;i++)ctx.lineTo(pts[i][0],pts[i][1]);ctx.closePath();ctx.fillStyle=fill;ctx.fill();if(stroke){ctx.strokeStyle=stroke;ctx.lineWidth=1.5;ctx.stroke();}};
+ const cape=(fill)=>poly([[-15,35],[-27,48],[-34,86],[-15,78],[0,91],[14,78],[29,49],[15,35],[8,67],[0,73],[-8,66]],fill,'rgba(255,255,255,.25)');
+ if(heroName==='Onyx'||heroName==='Shade'||heroName==='Dread'||heroName==='Phantom'){
+   cape(heroName==='Shade'?'#151725':'#080b16');
+   poly([[-15,4],[-18,-4],[-8,-1],[0,-9],[9,-1],[17,-4],[13,13],[7,8],[-7,8]],heroName==='Phantom'?'#493b73':'#0a0c18');
+ }
+ if(heroName==='Titan'||heroName==='Atlas'||heroName==='Rook'||heroName==='Warlord'){
+   poly([[-17,34],[-31,27],[-39,37],[-34,53],[-19,49]],heroName==='Titan'?'#7561aa':'#454b5e');
+   poly([[17,34],[31,27],[39,37],[34,53],[19,49]],heroName==='Titan'?'#7561aa':'#454b5e');
+   if(heroName==='Titan'||heroName==='Atlas') {poly([[-13,34],[-19,19],[-7,25],[0,12],[7,25],[19,19],[13,35]],'#d5c5ff');}
+ }
+ if(heroName==='Ronin'){
+   poly([[-12,4],[-18,-3],[-7,-1],[0,-7],[8,-1],[16,-3],[11,7]],'#6d3c28');
+   limb(-2,-3,-1,-22,4,'#18131b');ellipse(-1,-24,5,4,'#e9d7bd');
+   limb(-20,38,-34,57,4,'#d9dce8');limb(-34,57,-40,65,7,'#4b2b28');
+ }
+ if(heroName==='Viper'){
+   poly([[-14,5],[-20,-5],[-7,0],[0,-13],[7,0],[20,-5],[14,8]],'#163d2b');
+   poly([[18,37],[31,32],[38,44],[28,51]],'#194c35');
+   limb(28,48,42,35,3,'#b6ffd0');limb(42,35,46,27,2,'#b6ffd0');
+ }
+ if(heroName==='Phoenix'){
+   poly([[-15,39],[-31,27],[-46,17],[-38,38],[-48,34],[-33,58],[-18,62]],'#ff7a22');
+   poly([[15,39],[31,27],[46,17],[38,38],[48,34],[33,58],[18,62]],'#ffd166');
+   ctx.save();ctx.shadowColor='#ff7a22';ctx.shadowBlur=12;poly([[-10,-1],[-8,-13],[0,-6],[7,-17],[10,0]],'#ffb02e');ctx.restore();
+ }
+ if(heroName==='Frost'){
+   poly([[-14,5],[-20,-8],[-9,-3],[-5,-17],[2,-5],[10,-14],[12,0],[19,-4],[12,10]],'#bff7ff');
+   poly([[-22,42],[-33,37],[-29,52],[-18,56]],'#70d9ef');
+ }
+ if(heroName==='Storm'||heroName==='Nova'){
+   poly([[-13,5],[-20,-6],[-5,-2],[2,-17],[7,-3],[18,-8],[12,8]],heroName==='Storm'?'#ffe58a':'#8ff6ff');
+   if(heroName==='Storm'){poly([[24,39],[37,35],[31,46],[40,49],[24,54]],'#fff1a3');}
+ }
+ if(heroName==='Ember'||heroName==='Blaze'){
+   poly([[-13,5],[-17,-6],[-8,-1],[-5,-15],[2,-5],[9,-17],[9,-1],[17,-5],[12,8]],heroName==='Blaze'?'#ff3d22':'#ff9b42');
+   poly([[-21,40],[-32,31],[-27,47],[-18,52]],'#b83224');
+ }
+ if(heroName==='Echo'){
+   ctx.strokeStyle='#b7fbff';ctx.lineWidth=3;ctx.shadowColor='#56cfe1';ctx.shadowBlur=8;
+   ctx.beginPath();ctx.arc(-4,14,18,-1.1,1.1);ctx.stroke();ctx.beginPath();ctx.arc(-4,14,25,-1.1,1.1);ctx.stroke();ctx.shadowBlur=0;
+   ellipse(0,-2,7,5,'#b5f9ff');
+ }
  if(attackType==='special'&&attacking){ctx.save();ctx.globalAlpha=.22+.12*Math.sin(performance.now()*.02);ctx.shadowColor=glow;ctx.shadowBlur=28;ellipse(0,57,35,54,glow);ctx.restore();}
  // Back leg: articulated thigh, shin, armored boot and small edge highlights.
  const backKneeX=-17+stride*5, frontKneeX=15-stride*5;
@@ -372,6 +546,14 @@ function drawFighter(f){
  // Shoulder plate on the front side.
  ctx.beginPath();ctx.moveTo(9,32);ctx.lineTo(22,29);ctx.lineTo(31,38);ctx.lineTo(25,47);ctx.lineTo(15,43);ctx.closePath();ctx.fillStyle=grad(10,29,30,46,[[0,accent],[.25,c],[.7,'#22283c'],[1,dark]]);ctx.fill();
  ctx.strokeStyle='rgba(255,255,255,.35)';ctx.lineWidth=1;ctx.stroke();
+ // Extra signature armor marks help each champion remain readable during movement.
+ if(heroName==='Rook'||heroName==='Atlas'||heroName==='Titan'){
+   poly([[-20,68],[-9,73],[-12,88],[-22,83]],heroName==='Rook'?'#aeb8c9':'#8f7bc6');
+   poly([[20,68],[9,73],[12,88],[22,83]],heroName==='Rook'?'#aeb8c9':'#8f7bc6');
+ }
+ if(heroName==='Shade'||heroName==='Onyx'||heroName==='Phantom'){
+   poly([[-8,34],[0,29],[8,34],[6,61],[0,68],[-6,61]],'#080b16','rgba(150,130,255,.6)');
+ }
  // Defensive field and special-energy trails.
  if(f.blocking){ctx.save();ctx.globalAlpha=.75;ctx.strokeStyle='#bcecff';ctx.lineWidth=3;ctx.shadowColor='#5bd8ff';ctx.shadowBlur=14;ctx.beginPath();ctx.ellipse(7,49,38,43,-.08,-1.18,1.18);ctx.stroke();ctx.restore();}
  if(attackType==='special'&&attacking){ctx.save();ctx.globalAlpha=.8;ctx.strokeStyle=glow;ctx.lineWidth=5;ctx.shadowColor=glow;ctx.shadowBlur=20;ctx.beginPath();ctx.arc(handX+7,handY,19,-1.3,1.4);ctx.stroke();ctx.globalAlpha=.3;ctx.fillStyle=accent;ctx.beginPath();ctx.arc(handX+7,handY,15,0,Math.PI*2);ctx.fill();ctx.restore();}
@@ -380,10 +562,11 @@ function drawFighter(f){
 }
 function draw(){
  ctx.clearRect(0,0,W,H);drawStage();
- if(player&&enemy){drawFighter(player);drawFighter(enemy);}
+ if(player&&enemy && !threeD){drawFighter(player);drawFighter(enemy);}
  particles.forEach(p=>{ctx.globalAlpha=Math.max(0,p.life/35);ctx.fillStyle=p.color;ctx.beginPath();ctx.arc(p.x,p.y,p.size,0,Math.PI*2);ctx.fill();});ctx.globalAlpha=1;
  texts.forEach(t=>{ctx.globalAlpha=Math.min(1,t.life/15);ctx.fillStyle=t.color;ctx.font=`900 ${Math.max(15,W*.025)}px system-ui`;ctx.textAlign='center';ctx.shadowColor='#000';ctx.shadowBlur=5;ctx.fillText(t.text,t.x,t.y);ctx.shadowBlur=0;});ctx.globalAlpha=1;
  if(gameOn&&!roundOver){ctx.fillStyle='#9da9d0';ctx.font='12px system-ui';ctx.textAlign='center';ctx.fillText(`SPECIAL ${Math.floor(player.specialCharge)}%`,W*.25,66);ctx.fillText(`SPECIAL ${Math.floor(enemy.specialCharge)}%`,W*.75,66);}
+ if(threeD && player && enemy) threeD.render(player,enemy,1);
 }
 function loop(now){const dt=Math.min(2,(now-last)/16.67||1);last=now;update(dt);draw();requestAnimationFrame(loop);}
 requestAnimationFrame(loop);
